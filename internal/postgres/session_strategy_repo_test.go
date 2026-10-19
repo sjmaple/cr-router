@@ -112,7 +112,7 @@ func TestSessionStrategyRepoGetMissingMeansStable(t *testing.T) {
 	assert.Empty(t, preference)
 }
 
-func TestSessionStrategyRepoToggleAcceptsOnlyHMMBeta(t *testing.T) {
+func TestSessionStrategyRepoToggleAcceptsBetaClassifiers(t *testing.T) {
 	t.Parallel()
 
 	installationID := uuid.New()
@@ -136,9 +136,16 @@ func TestSessionStrategyRepoToggleAcceptsOnlyHMMBeta(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, enabled)
 	assert.True(t, strings.Contains(db.rowQuery, "ON CONFLICT (installation_id, session_key)"))
-	assert.Contains(t, db.rowQuery, "enabled = NOT router.session_strategy_preferences.enabled")
+	assert.Contains(t, db.rowQuery, "THEN NOT router.session_strategy_preferences.enabled ELSE TRUE END")
 	assert.Contains(t, db.rowQuery, "RETURNING enabled")
 	assert.Equal(t, []any{installationID, key[:], string(router.StrategyHMMBeta)}, db.rowArgs)
+	enabled, err = repo.Toggle(context.Background(), sessionstrategy.Preference{
+		InstallationID: installationID,
+		SessionKey:     key,
+		Strategy:       router.StrategyHMMQwen,
+	})
+	require.NoError(t, err)
+	assert.True(t, enabled, "selecting a different beta changes the active classifier")
 }
 
 func TestSessionStrategyRepoDisableReportsWhetherBetaWasOn(t *testing.T) {
@@ -149,16 +156,16 @@ func TestSessionStrategyRepoDisableReportsWhetherBetaWasOn(t *testing.T) {
 	db := &sessionStrategyDB{execTag: pgconn.NewCommandTag("UPDATE 1")}
 	repo := NewSessionStrategyRepo(db)
 
-	wasEnabled, err := repo.Disable(context.Background(), installationID, key)
+	wasEnabled, err := repo.Disable(context.Background(), installationID, key, router.StrategyHMMBeta)
 	require.NoError(t, err)
 	assert.True(t, wasEnabled)
 	require.Len(t, db.execCalls, 1)
 	assert.Contains(t, db.execCalls[0].query, "SET enabled = FALSE")
 	assert.Contains(t, db.execCalls[0].query, "AND enabled")
-	assert.Equal(t, []any{installationID, key[:]}, db.execCalls[0].args)
+	assert.Equal(t, []any{installationID, key[:], string(router.StrategyHMMBeta)}, db.execCalls[0].args)
 
 	db.execTag = pgconn.NewCommandTag("UPDATE 0")
-	wasEnabled, err = repo.Disable(context.Background(), installationID, key)
+	wasEnabled, err = repo.Disable(context.Background(), installationID, key, router.StrategyHMMBeta)
 	require.NoError(t, err)
 	assert.False(t, wasEnabled, "a session already on stable routing was not enabled")
 }
