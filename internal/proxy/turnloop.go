@@ -1051,7 +1051,10 @@ func (s *Service) runTurnLoop(
 			if !ok {
 				// Gateway empty result = no aliases configured (customer fix), not a router fault.
 				hardPinErr := cluster.ErrClusterUnavailable
-				if len(req.GatewayProviders) > 0 {
+				switch {
+				case s.hardPinBlockedByContextWindow(hardPinReq, req):
+					hardPinErr = policy.ErrContextWindowExceeded
+				case len(req.GatewayProviders) > 0:
 					hardPinErr = policy.ErrGatewayServesNoDeployedModel
 				}
 				log.Warn(
@@ -2948,4 +2951,22 @@ func sortedEnabledKeys(m map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// hardPinBlockedByContextWindow reports whether the hard-pin resolver only came
+// back empty because of the context-window pre-filter, so the client gets its
+// native prompt-too-long error instead of a retryable routing outage.
+func (s *Service) hardPinBlockedByContextWindow(hardPinReq HardPinRequest, req router.Request) bool {
+	if len(req.ContextWindowExcludedModels) == 0 {
+		return false
+	}
+	unsized := make(map[string]struct{}, len(hardPinReq.ExcludedModels))
+	for model := range hardPinReq.ExcludedModels {
+		if _, sized := req.ContextWindowExcludedModels[model]; !sized {
+			unsized[model] = struct{}{}
+		}
+	}
+	hardPinReq.ExcludedModels = unsized
+	_, _, ok := s.hardPinResolver(hardPinReq)
+	return ok
 }

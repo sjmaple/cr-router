@@ -164,17 +164,45 @@ func TestAdmitWidestOnTotalOverflow(t *testing.T) {
 	}
 	ruledOut, overflowed := excludeContextOverflowModels(2_000_000, 0, 8_000, nil, nil, available)
 	require.ElementsMatch(t, []string{"claude-opus-4-8", "claude-haiku-4-5"}, overflowed)
-	assert.Equal(t, []string{"claude-opus-4-8"}, admitWidestOnTotalOverflow(ruledOut, overflowed, available, nil),
+	assert.Equal(t, []string{"claude-opus-4-8"}, admitWidestOnTotalOverflow(ruledOut, overflowed, available, nil, nil),
 		"only the widest model is re-admitted")
 
 	ruledOut, overflowed = excludeContextOverflowModels(250_000, 0, 8_000, nil, nil, available)
-	assert.Nil(t, admitWidestOnTotalOverflow(ruledOut, overflowed, available, nil),
+	assert.Nil(t, admitWidestOnTotalOverflow(ruledOut, overflowed, available, nil, nil),
 		"a request some model fits leaves the pre-filter's exclusions alone")
 
 	policyExcluded := map[string]struct{}{"claude-opus-4-8": {}}
 	ruledOut, overflowed = excludeContextOverflowModels(2_000_000, 0, 8_000, nil, policyExcluded, available)
-	assert.Equal(t, []string{"claude-haiku-4-5"}, admitWidestOnTotalOverflow(ruledOut, overflowed, available, nil),
+	assert.Equal(t, []string{"claude-haiku-4-5"}, admitWidestOnTotalOverflow(ruledOut, overflowed, available, nil, nil),
 		"a policy-excluded model is never re-admitted; the widest allowed one is")
+}
+
+// A wider model the request cannot reach (its provider is not enabled) must
+// not count as fitting: every servable model overflowing is still a total
+// overflow, and the servable widest go to the upstream.
+func TestAdmitWidestOnTotalOverflow_IgnoresUnservableModels(t *testing.T) {
+	available := map[string]struct{}{
+		"claude-opus-5-5":  {},
+		"claude-haiku-5-5": {},
+		"gemini-3.5-flash": {},
+	}
+	anthropicOnly := map[string]struct{}{providers.ProviderAnthropic: {}}
+	ruledOut, overflowed := excludeContextOverflowModels(872_297, 0, 128_000, anthropicOnly, nil, available)
+	require.ElementsMatch(t, []string{"claude-opus-5-5", "claude-haiku-5-5"}, overflowed,
+		"the 1.05M Gemini window still fits the estimate")
+	assert.ElementsMatch(t, []string{"claude-opus-5-5", "claude-haiku-5-5"},
+		admitWidestOnTotalOverflow(ruledOut, overflowed, available, anthropicOnly, nil))
+
+	withGoogle := map[string]struct{}{providers.ProviderAnthropic: {}, providers.ProviderGoogle: {}}
+	ruledOut, overflowed = excludeContextOverflowModels(872_297, 0, 128_000, withGoogle, nil, available)
+	assert.Nil(t, admitWidestOnTotalOverflow(ruledOut, overflowed, available, withGoogle, nil),
+		"a servable model that fits leaves the exclusions alone")
+
+	customGateway := map[string][]string{"gemini-3.5-flash": {providers.ProviderOpenRouter}}
+	withGateway := map[string]struct{}{providers.ProviderAnthropic: {}, providers.ProviderOpenRouter: {}}
+	ruledOut, overflowed = excludeContextOverflowModels(872_297, 0, 128_000, withGateway, nil, available)
+	assert.Nil(t, admitWidestOnTotalOverflow(ruledOut, overflowed, available, withGateway, customGateway),
+		"a configuration-declared binding makes the model servable")
 }
 
 func TestWithoutModels(t *testing.T) {
