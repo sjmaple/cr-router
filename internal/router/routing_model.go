@@ -9,12 +9,13 @@ const (
 	ModelAutomatic RoutingModel = "weave-auto"
 	ModelHMM       RoutingModel = "weave-hmm-20261019-0001v1"
 	ModelQwen      RoutingModel = "weave-qwen-20261008-0001v2"
+	ModelJEV       RoutingModel = "weave-jev-20261019-0001v1"
 )
 
 // IsRoutingModel reports whether model selects an automatic routing policy.
 func IsRoutingModel(model string) bool {
 	switch RoutingModel(model) {
-	case ModelAutomatic, ModelHMM, ModelQwen:
+	case ModelAutomatic, ModelHMM, ModelQwen, ModelJEV:
 		return true
 	default:
 		return false
