@@ -20,7 +20,7 @@ const DefaultTimeout = 3 * time.Second
 
 const maxResponseBytes = 1 << 20
 
-// QuestionID names one typed routing question.
+// QuestionID names one typed routing question; Choice is its typed answer label.
 type QuestionID string
 
 const (
@@ -87,7 +87,8 @@ type Answer struct {
 	Confidence    float64            `json:"confidence"`
 }
 
-// Classifier answers routing questions about a compact conversation state.
+// Classifier answers routing questions about a compact conversation state. Router
+// depends on this interface so tests can substitute a deterministic fake.
 type Classifier interface {
 	Classify(ctx context.Context, state State, ids []QuestionID) (map[QuestionID]Answer, error)
 }

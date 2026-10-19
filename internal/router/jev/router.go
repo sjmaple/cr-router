@@ -11,40 +11,35 @@ import (
 	"weave-os/router/internal/router/catalog"
 )
 
-// EscalationCadence checks for escalation on every third logical call.
+// EscalationCadence is the call spacing between escalation checks.
 const EscalationCadence = 3
 
 const maxTrackedSessions = 10_000
-
-// Harness selects the model lineup for the calling coding agent.
-type Harness string
-
-const (
-	HarnessClaudeCode Harness = "claude_code"
-	HarnessCodex      Harness = "codex"
-)
 
 const clientAppCodex = "codex"
 
 // Lineup is one harness's models: Top for high-task judgment and escalation,
 // Fast for defined work, LowTaskJudgment for judgment calls on low tasks.
+// SubscriptionProvider is the provider whose subscription skips task judgment.
 type Lineup struct {
-	Top             string
-	Fast            string
-	LowTaskJudgment string
-	Subscription    string
+	Top                  string
+	Fast                 string
+	LowTaskJudgment      string
+	SubscriptionProvider string
 }
 
-// Lineups pins each harness's models.
-var Lineups = map[Harness]Lineup{
-	HarnessClaudeCode: {Top: string(catalog.ModelIDClaudeOpus48), Fast: string(catalog.ModelIDClaudeHaiku45), LowTaskJudgment: "z-ai/glm-5.3", Subscription: providers.ProviderAnthropic},
-	HarnessCodex:      {Top: "gpt-6.1-sol", Fast: string(catalog.ModelIDGPT56Luna), LowTaskJudgment: "z-ai/glm-5.3", Subscription: providers.ProviderOpenAI},
-}
+var (
+	// ClaudeCodeLineup serves Claude Code and every non-Codex client.
+	ClaudeCodeLineup = Lineup{Top: string(catalog.ModelIDClaudeOpus48), Fast: string(catalog.ModelIDClaudeHaiku45), LowTaskJudgment: "z-ai/glm-5.3", SubscriptionProvider: providers.ProviderAnthropic}
+	// CodexLineup serves Codex.
+	CodexLineup = Lineup{Top: "gpt-6.1-sol", Fast: string(catalog.ModelIDGPT56Luna), LowTaskJudgment: "z-ai/glm-5.3", SubscriptionProvider: providers.ProviderOpenAI}
+)
 
+// sessionState is what the router remembers per session between calls.
 type sessionState struct {
-	task      Choice
-	escalated bool
-	fastSince bool
+	taskComplexity      Choice
+	escalated           bool
+	fastSinceCheckpoint bool
 }
 
 // Router asks JEV for task complexity, call complexity and periodic escalation,
@@ -56,82 +51,77 @@ type Router struct {
 	order      []string
 }
 
-// New returns a JEV router backed by classifier.
+// New returns a JEV router that keeps per-session state in memory, evicting the
+// oldest session past maxTrackedSessions.
 func New(classifier Classifier) *Router {
 	return &Router{classifier: classifier, sessions: map[string]sessionState{}}
 }
 
-// HarnessFor maps a client app to its lineup.
-func HarnessFor(clientApp string) Harness {
-	if strings.EqualFold(clientApp, clientAppCodex) {
-		return HarnessCodex
-	}
-	return HarnessClaudeCode
-}
-
-// IsCheckpoint reports whether callIndex is an escalation check (calls 4, 7, 10, ...).
-func IsCheckpoint(callIndex int) bool {
-	return callIndex > 1 && (callIndex-1)%EscalationCadence == 0
-}
-
 func (r *Router) Route(ctx context.Context, req router.Request) (router.Decision, error) {
-	lineup := Lineups[HarnessFor(req.ClientApp)]
-	key := sessionKey(req)
-	session := r.load(key)
-	_, subscribed := req.SubscriptionProviders[lineup.Subscription]
+	lineup := ClaudeCodeLineup
+	if strings.EqualFold(req.ClientApp, clientAppCodex) {
+		lineup = CodexLineup
+	}
+	sessionID := req.FeedbackKey
+	if sessionID == "" {
+		sessionID = req.ClientSessionID
+	}
+	session := r.load(sessionID)
+	_, subscribed := req.SubscriptionProviders[lineup.SubscriptionProvider]
 	if subscribed {
-		session.task = ChoiceHigh
+		session.taskComplexity = ChoiceHigh
 	}
 	callIndex := AgentCallIndex(req.ConversationMessages)
-	checkpoint := IsCheckpoint(callIndex)
-	ids := []QuestionID{}
+	// Escalation is checked before calls 4, 7, 10, ...
+	checkpoint := callIndex > 1 && (callIndex-1)%EscalationCadence == 0
+	questions := []QuestionID{}
 	if !session.escalated {
-		ids = append(ids, QuestionCallComplexity)
+		questions = append(questions, QuestionCallComplexity)
 	}
-	if session.task == "" {
-		ids = append(ids, QuestionTaskComplexity)
+	if session.taskComplexity == "" {
+		questions = append(questions, QuestionTaskComplexity)
 	}
 	if checkpoint && !session.escalated {
-		ids = append(ids, QuestionEscalate)
+		questions = append(questions, QuestionEscalate)
 	}
 	answers := map[QuestionID]Answer{}
-	if len(ids) > 0 {
-		classified, err := r.classifier.Classify(ctx, BuildState(req.ConversationMessages), ids)
+	if len(questions) > 0 {
+		classified, err := r.classifier.Classify(ctx, BuildState(req.ConversationMessages), questions)
 		if err != nil {
 			return router.Decision{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		answers = classified
 	}
 	if answer, found := answers[QuestionTaskComplexity]; found {
-		session.task = answer.Choice
+		session.taskComplexity = answer.Choice
 	}
-	escalationEligible := session.task == ChoiceLow || session.fastSince
+	escalationEligible := session.taskComplexity == ChoiceLow || session.fastSinceCheckpoint
 	if answer, found := answers[QuestionEscalate]; found && escalationEligible && answer.Choice == ChoiceYes {
 		session.escalated = true
 	}
 	if checkpoint {
-		session.fastSince = false
+		session.fastSinceCheckpoint = false
 	}
-	model := pickModel(lineup, session, answers[QuestionCallComplexity].Choice)
-	decision, err := resolve(req, model, lineup)
+	callComplexity := answers[QuestionCallComplexity].Choice
+	decision, err := resolve(req, pickModel(lineup, session, callComplexity), lineup)
 	if err != nil {
 		return router.Decision{}, err
 	}
 	if decision.Model == lineup.Fast {
-		session.fastSince = true
+		session.fastSinceCheckpoint = true
 	}
-	r.store(key, session)
-	decision.Reason = fmt.Sprintf("jev task=%s call=%s escalated=%t subscription=%t call_index=%d", session.task, answers[QuestionCallComplexity].Choice, session.escalated, subscribed, callIndex)
+	r.store(sessionID, session)
+	decision.Reason = fmt.Sprintf("jev task=%s call=%s escalated=%t subscription=%t call_index=%d", session.taskComplexity, callComplexity, session.escalated, subscribed, callIndex)
 	return decision, nil
 }
 
-func pickModel(lineup Lineup, session sessionState, call Choice) string {
+func pickModel(lineup Lineup, session sessionState, callComplexity Choice) string {
 	switch {
 	case session.escalated:
 		return lineup.Top
-	case call == ChoiceLow:
+	case callComplexity == ChoiceLow:
 		return lineup.Fast
-	case session.task == ChoiceHigh:
+	case session.taskComplexity == ChoiceHigh:
 		return lineup.Top
 	default:
 		return lineup.LowTaskJudgment
@@ -142,14 +132,16 @@ func pickModel(lineup Lineup, session sessionState, call Choice) string {
 // falls back through the lineup from strongest to cheapest.
 func resolve(req router.Request, model string, lineup Lineup) (router.Decision, error) {
 	for _, candidate := range []string{model, lineup.Top, lineup.Fast, lineup.LowTaskJudgment} {
-		if provider, ok := dispatchable(req, candidate); ok {
+		if provider, ok := dispatchProvider(req, candidate); ok {
 			return router.Decision{Provider: provider, Model: candidate}, nil
 		}
 	}
 	return router.Decision{}, fmt.Errorf("%w: no lineup model is dispatchable", ErrUnavailable)
 }
 
-func dispatchable(req router.Request, model string) (string, bool) {
+// dispatchProvider returns the first provider that can serve model for req,
+// honoring exclusions, allowlists, image support, custom bindings and gateways.
+func dispatchProvider(req router.Request, model string) (string, bool) {
 	for _, excluded := range []map[string]struct{}{req.ExcludedModels, req.SafetyExcludedModels, req.ContextWindowExcludedModels, req.UnsignedHistoryExcludedModels} {
 		if _, found := excluded[model]; found {
 			return "", false
@@ -158,41 +150,55 @@ func dispatchable(req router.Request, model string) (string, bool) {
 	if _, allowed := req.AllowedModels[model]; len(req.AllowedModels) > 0 && !allowed {
 		return "", false
 	}
-	entry, found := catalog.ByID(model)
-	if !found {
+	if _, textOnly := catalog.ImageUnsupportedSet()[model]; req.HasImages && textOnly {
 		return "", false
 	}
-	for _, binding := range entry.Providers {
-		if _, enabled := req.EnabledProviders[binding.Provider]; req.EnabledProviders == nil || enabled {
-			return binding.Provider, true
+	bindings := catalog.EnumerateBindingsWithCustom(model, availableProviders(req, model), req.CustomBindings)
+	if len(bindings) == 0 {
+		return "", false
+	}
+	return bindings[0].Provider, true
+}
+
+// availableProviders limits gateway installations to their aliased gateways
+// and treats a nil EnabledProviders as every catalog provider.
+func availableProviders(req router.Request, model string) map[string]struct{} {
+	if len(req.GatewayProviders) > 0 {
+		gateways := map[string]struct{}{}
+		for _, provider := range req.CustomBindings[model] {
+			if _, gateway := req.GatewayProviders[provider]; gateway {
+				gateways[provider] = struct{}{}
+			}
 		}
+		return gateways
 	}
-	return "", false
+	if req.EnabledProviders != nil {
+		return req.EnabledProviders
+	}
+	entry, _ := catalog.ByID(model)
+	all := map[string]struct{}{}
+	for _, binding := range entry.Providers {
+		all[binding.Provider] = struct{}{}
+	}
+	return all
 }
 
-func sessionKey(req router.Request) string {
-	if req.FeedbackKey != "" {
-		return req.FeedbackKey
-	}
-	return req.ClientSessionID
-}
-
-func (r *Router) load(key string) sessionState {
+func (r *Router) load(sessionID string) sessionState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.sessions[key]
+	return r.sessions[sessionID]
 }
 
-func (r *Router) store(key string, session sessionState) {
-	if key == "" {
+func (r *Router) store(sessionID string, session sessionState) {
+	if sessionID == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, known := r.sessions[key]; !known {
-		r.order = append(r.order, key)
+	if _, known := r.sessions[sessionID]; !known {
+		r.order = append(r.order, sessionID)
 	}
-	r.sessions[key] = session
+	r.sessions[sessionID] = session
 	for len(r.order) > maxTrackedSessions {
 		delete(r.sessions, r.order[0])
 		r.order = r.order[1:]

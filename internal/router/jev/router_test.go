@@ -155,3 +155,31 @@ func TestBuildStateKeepsObjectiveAndToolStatusOnly(t *testing.T) {
 	require.Len(t, state.RecentAgentTurns, 6)
 	require.Equal(t, []jev.ToolCall{{Name: "bash", Status: jev.ToolCallError}}, state.RecentAgentTurns[0].ToolCalls)
 }
+
+func TestImageRequestSkipsTextOnlyJudgmentModel(t *testing.T) {
+	classifier := &scriptedClassifier{answers: map[jev.QuestionID]jev.Choice{jev.QuestionTaskComplexity: jev.ChoiceLow, jev.QuestionCallComplexity: jev.ChoiceHigh}}
+	req := request("", 1)
+	req.HasImages = true
+	decision, err := jev.New(classifier).Route(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, "claude-opus-4-8", decision.Model)
+}
+
+func TestGatewayInstallationDispatchesThroughAlias(t *testing.T) {
+	classifier := &scriptedClassifier{answers: map[jev.QuestionID]jev.Choice{jev.QuestionTaskComplexity: jev.ChoiceHigh, jev.QuestionCallComplexity: jev.ChoiceHigh}}
+	req := request("", 1)
+	req.GatewayProviders = map[string]struct{}{"gateway": {}}
+	req.CustomBindings = map[string][]string{"claude-opus-4-8": {"gateway"}}
+	decision, err := jev.New(classifier).Route(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, "claude-opus-4-8", decision.Model)
+	require.Equal(t, "gateway", decision.Provider)
+}
+
+func TestGatewayInstallationWithoutAliasIsUnavailable(t *testing.T) {
+	classifier := &scriptedClassifier{answers: map[jev.QuestionID]jev.Choice{jev.QuestionTaskComplexity: jev.ChoiceHigh, jev.QuestionCallComplexity: jev.ChoiceHigh}}
+	req := request("", 1)
+	req.GatewayProviders = map[string]struct{}{"gateway": {}}
+	_, err := jev.New(classifier).Route(context.Background(), req)
+	require.ErrorIs(t, err, jev.ErrUnavailable)
+}

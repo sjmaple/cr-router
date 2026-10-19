@@ -13,6 +13,7 @@ import (
 	"weave-os/router/internal/router/cluster"
 	"weave-os/router/internal/router/eligibility"
 	"weave-os/router/internal/router/hmm"
+	"weave-os/router/internal/router/jev"
 	"weave-os/router/internal/router/policy"
 	"weave-os/router/internal/router/rl"
 	"weave-os/router/internal/translate"
@@ -70,6 +71,7 @@ const (
 	DispatchErrorClassifierUnavailable
 	DispatchErrorSpendCapReached
 	DispatchErrorSubscriptionClientAppRefused
+	DispatchErrorJEVUnavailable
 )
 
 // DispatchErrorClass is the format-agnostic classification of a dispatch
@@ -397,6 +399,15 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			RetryAfter: true,
 			LogLevel:   "error",
 			LogMessage: "Bandit routing unavailable",
+		}, true
+	case errors.Is(err, jev.ErrUnavailable):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorJEVUnavailable,
+			Status:     http.StatusServiceUnavailable,
+			Message:    "Router unavailable: JEV routing failed and no fallback is configured.",
+			RetryAfter: true,
+			LogLevel:   "error",
+			LogMessage: "JEV routing unavailable",
 		}, true
 	case errors.Is(err, hmm.ErrHMMUnavailable):
 		return DispatchErrorClass{
