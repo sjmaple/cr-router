@@ -286,13 +286,7 @@ func NewDynamicRouter(manager *Manager, strategy router.Strategy) *DynamicRouter
 
 // Available reports whether this lane has a validated snapshot to serve.
 func (r *DynamicRouter) Available() bool {
-	if r == nil {
-		return false
-	}
-	if r.prepared != nil {
-		return r.prepared.Routers[r.strategy] != nil
-	}
-	return r.manager != nil && r.manager.Active() != nil
+	return r != nil && (r.prepared != nil || r.manager != nil && r.manager.Active() != nil)
 }
 
 // Route delegates the complete request to one immutable runtime snapshot.

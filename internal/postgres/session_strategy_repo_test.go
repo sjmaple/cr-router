@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -194,6 +195,7 @@ func TestSessionPinMutationsCarryExpectedRoutingStrategy(t *testing.T) {
 	t.Parallel()
 
 	key := [sessionpin.SessionKeyLen]byte{10, 11, 12}
+	unscopedPinExclusions := fmt.Sprintf("NOT IN ('%s', '%s')", router.StrategyHMMBeta, router.StrategyHMMQwen)
 	db := &sessionStrategyDB{row: sessionStrategyRow{err: sql.ErrNoRows}}
 	repo := NewSessionPinRepo(db)
 	ctx := context.Background()
@@ -202,7 +204,7 @@ func TestSessionPinMutationsCarryExpectedRoutingStrategy(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, ok)
 	assert.Contains(t, db.rowQuery, "routing_strategy = ''")
-	assert.Contains(t, db.rowQuery, "<> 'hmm_beta'")
+	assert.Contains(t, db.rowQuery, unscopedPinExclusions)
 	assert.Equal(t, []any{key[:], "default", string(router.StrategyCluster)}, db.rowArgs)
 
 	_, ok, err = repo.Consume(ctx, key, "default", router.StrategyHMMBeta)
@@ -229,7 +231,7 @@ func TestSessionPinMutationsCarryExpectedRoutingStrategy(t *testing.T) {
 	require.Len(t, db.execCalls, 4)
 	for _, call := range db.execCalls {
 		assert.Contains(t, call.query, "routing_strategy = ''")
-		assert.Contains(t, call.query, "<> 'hmm_beta'")
+		assert.Contains(t, call.query, unscopedPinExclusions)
 		assert.Equal(t, string(router.StrategyHMMBeta), call.args[len(call.args)-1])
 	}
 }
