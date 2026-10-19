@@ -102,7 +102,7 @@ func hmmPolicySnapshotBuilder(
 			strategyArmSelector := armSelector
 			if strategyPolicy, found := candidate.StrategyPolicies[strategy]; found {
 				strategyPolicySHA = strategyPolicy.Reference.SHA256
-				strategyArmSelector = selection.Selector(strategyPolicy.Roster)
+				strategyArmSelector = selection.SelectorWithDomainEvidence(strategyPolicy.Roster, domainEvidence, evidenceSHA)
 			}
 			strategyCapabilities := capabilities
 			if strategy == router.StrategyHMMQwen {

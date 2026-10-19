@@ -146,7 +146,8 @@ func TestSessionStrategyRepoToggleAcceptsBetaClassifiers(t *testing.T) {
 		Strategy:       router.StrategyHMMQwen,
 	})
 	require.NoError(t, err)
-	assert.True(t, enabled, "selecting a different beta changes the active classifier")
+	assert.True(t, enabled)
+	assert.Equal(t, []any{installationID, key[:], string(router.StrategyHMMQwen)}, db.rowArgs, "the switch must write the newly selected classifier")
 }
 
 func TestSessionStrategyRepoDisableReportsWhetherBetaWasOn(t *testing.T) {

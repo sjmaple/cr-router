@@ -1491,7 +1491,7 @@ func withoutModelsKeep(set map[string]struct{}, models, keep []string) map[strin
 // parts lacking the thoughtSignature Gemini issued. Scoped by family name; if
 // the catalog later grows a per-model capability flag this should move there.
 func gemini3xRequiresSignedHistory(model string) bool {
-	return strings.HasPrefix(model, "gemini-3")
+	return strings.HasPrefix(model, "gemini-3") || model == router.ModelGemini4Argon
 }
 
 // excludeGemini3xOnUnsignedHistory augments excluded with every Gemini 3.x

@@ -16,7 +16,7 @@ import (
 
 // applyRoutingModel runs after classifier admission and reuses its parsed body.
 func applyRoutingModel(c *gin.Context, body []byte, available StrategyAvailability) bool {
-	model := router.RoutingModel(gjson.GetBytes(body, "model").String())
+	model := router.RoutingModel(requestedModel(c, body))
 	if !router.IsRoutingModel(string(model)) {
 		if strings.HasPrefix(string(model), "weave-") {
 			observability.FromGin(c).Debug("Unknown routing model rejected")
@@ -74,4 +74,14 @@ func applyRoutingModel(c *gin.Context, body []byte, available StrategyAvailabili
 	c.Request = c.Request.WithContext(router.WithRoutingModel(c.Request.Context(), model))
 	observability.FromGin(c).Debug("Routing model selected", "model", model)
 	return true
+}
+
+// requestedModel reads body.model, falling back to the Gemini URL model that
+// standard generateContent requests carry instead of a body field.
+func requestedModel(c *gin.Context, body []byte) string {
+	if model := gjson.GetBytes(body, "model").String(); model != "" {
+		return model
+	}
+	model, _, _ := strings.Cut(c.Param("modelAction"), ":")
+	return model
 }

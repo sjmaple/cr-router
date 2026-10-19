@@ -122,7 +122,7 @@ func TestClassifierThreadsRemainExplicitlyEnrolled(t *testing.T) {
 	engine := gin.New()
 	engine.POST("/v1/router/threads", classifier.StartThreadHandler(svc))
 	for _, path := range []string{"/v1/messages", "/v1/responses"} {
-		engine.POST(path, middleware.WithClassifierThread(svc), func(c *gin.Context) {
+		engine.POST(path, middleware.WithClassifierThread(svc, svc.PolicyStrategyAvailable), func(c *gin.Context) {
 			strategy := router.StrategyFromContext(c.Request.Context())
 			if _, enrolled := c.Request.Context().Value(classifierEnrollmentTestKey{}).(bool); enrolled {
 				require.Equal(t, router.StrategyLLMClassifier, strategy)
@@ -161,4 +161,24 @@ func TestClassifierThreadsRemainExplicitlyEnrolled(t *testing.T) {
 			require.Equal(t, want, recorder.Code, recorder.Body.String())
 		}
 	}
+}
+
+func TestRoutingModelReadsGeminiURLModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	body := `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`
+	engine.POST("/v1beta/models/:modelAction", middleware.WithClassifierThread(&proxy.Service{}, func(router.Strategy) bool { return true }), func(c *gin.Context) {
+		require.Equal(t, router.StrategyHMMQwen, router.StrategyFromContext(c.Request.Context()))
+		model, selected := router.RoutingModelFromContext(c.Request.Context())
+		require.True(t, selected)
+		require.Equal(t, router.ModelQwen, model)
+		c.Status(http.StatusOK)
+	})
+	identity := requestcontext.ServingIdentity{Target: string(policyregistry.TargetInternal), ReleaseID: "reviewed-release", BindingID: "reviewed-binding", CredentialIdentity: "test-principal"}
+	ctx := requestcontext.WithServingIdentity(context.Background(), identity)
+	ctx = policyregistry.WithServingSnapshot(ctx, &policyregistry.Snapshot{Routers: map[router.Strategy]router.Router{router.StrategyHMMQwen: routingModelTestRouter{}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/"+string(router.ModelQwen)+":generateContent", strings.NewReader(body)).WithContext(ctx)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }

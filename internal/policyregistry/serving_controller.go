@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"time"
 
@@ -383,8 +384,8 @@ func (c *ServingController) validateProposal(ctx context.Context, proposal Propo
 			return errors.New("roster-only promotion must retain destination image and classifier")
 		}
 	case ChangeClassifier:
-		if !base.Classifier.Equal(source.Classifier) || base.RouterImageDigest != oldBase.RouterImageDigest || base.Policy != oldBase.Policy {
-			return errors.New("classifier-only promotion must retain destination image and policy")
+		if !base.Classifier.Equal(source.Classifier) || base.RouterImageDigest != oldBase.RouterImageDigest || base.Policy != oldBase.Policy || !maps.Equal(base.StrategyPolicies, oldBase.StrategyPolicies) {
+			return errors.New("classifier-only promotion must retain destination image, policy and strategy policies")
 		}
 	}
 	return nil

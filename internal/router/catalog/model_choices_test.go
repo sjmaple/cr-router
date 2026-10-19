@@ -16,13 +16,13 @@ func TestModelChoicesDescribeRoutersWithoutAddingDispatchModels(t *testing.T) {
 		require.NotEmpty(t, choice.Description)
 		require.False(t, seen[choice.Model], "duplicate model ID %s", choice.Model)
 		seen[choice.Model] = true
-		_, dispatchModel := ByID(choice.Model)
+		_, isDispatchable := ByID(choice.Model)
 		if choice.Kind == ModelChoiceRouter {
-			require.False(t, dispatchModel)
+			require.False(t, isDispatchable)
 			require.True(t, router.IsRoutingModel(choice.Model))
 		} else {
 			require.Equal(t, ModelChoiceDirect, choice.Kind)
-			require.True(t, dispatchModel)
+			require.True(t, isDispatchable)
 		}
 	}
 	require.True(t, seen[string(router.ModelHMM)])

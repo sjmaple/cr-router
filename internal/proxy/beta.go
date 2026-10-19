@@ -66,7 +66,7 @@ func betaArtifactHistoryFromContext(ctx context.Context) bool {
 
 func internalBetaSession(ctx context.Context) bool {
 	identity, managed := requestcontext.ServingIdentityFromContext(ctx)
-	return managed && identity.Target == string(policyregistry.TargetInternal) && identity.ReleaseID != "" && identity.BindingID != "" && identity.CredentialIdentity != ""
+	return managed && identity.Plan == "" && identity.Target == string(policyregistry.TargetInternal) && identity.ReleaseID != "" && identity.BindingID != "" && identity.CredentialIdentity != ""
 }
 
 // WithSessionStrategyStore wires durable per-session routing preferences.
@@ -125,9 +125,6 @@ func (s *Service) handleBetaCommand(
 		return writeBetaCommandResponse(w, env, fmt.Sprintf("Select a router with `wv router set-model %s`, `wv router set-model %s`, or `wv router set-model %s`, then start a new session.", router.ModelHMM, router.ModelQwen, router.ModelAutomatic), inputTokens)
 	}
 	strategy := cmd.Strategy
-	if strategy == "" {
-		strategy = router.StrategyHMMBeta
-	}
 	enabledMessage, disabledMessage, usageMessage, unavailableMessage := betaEnabledMessage, betaDisabledMessage, betaUsageMessage, betaUnavailable
 	if strategy == router.StrategyHMMQwen {
 		enabledMessage, disabledMessage, usageMessage, unavailableMessage = qwenEnabledMessage, qwenDisabledMessage, qwenUsageMessage, qwenUnavailable
