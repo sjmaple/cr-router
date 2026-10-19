@@ -2,6 +2,7 @@ package translate_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -37,4 +38,20 @@ func TestArgonUsesNativeGeminiThinkingAndValidatedTools(t *testing.T) {
 	require.NoError(t, err)
 	_, err = unsigned.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: router.ModelGemini4Argon})
 	require.ErrorIs(t, err, translate.ErrGeminiUnsignedToolHistory)
+}
+
+func TestArgonPreservesOutputBudgetsWithinItsNativeLimit(t *testing.T) {
+	for _, budget := range []struct{ requested, expected int }{{20000, 20000}, {64000, 32768}} {
+		envelope, err := translate.ParseOpenAI([]byte(fmt.Sprintf(`{"model":"Weave","messages":[{"role":"user","content":"Synthetic output-budget check."}],"max_tokens":%d}`, budget.requested)))
+		require.NoError(t, err)
+		prepared, err := envelope.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: router.ModelGemini4Argon})
+		require.NoError(t, err)
+		var emitted struct {
+			GenerationConfig struct {
+				MaxOutputTokens int `json:"maxOutputTokens"`
+			} `json:"generationConfig"`
+		}
+		require.NoError(t, json.Unmarshal(prepared.Body, &emitted))
+		require.Equal(t, budget.expected, emitted.GenerationConfig.MaxOutputTokens)
+	}
 }
