@@ -17,7 +17,11 @@ const classifierThreadField = "weave_classifier_thread"
 
 // WithClassifierThread runs after authentication and ordinary strategy selection.
 // The ticket is consumed here and never enters provider-forwarded headers.
-func WithClassifierThread(service *proxy.Service) gin.HandlerFunc {
+func WithClassifierThread(service *proxy.Service, modelAvailability ...StrategyAvailability) gin.HandlerFunc {
+	availability := StrategyAvailability(service.PolicyStrategyAvailable)
+	if len(modelAvailability) > 0 {
+		availability = modelAvailability[0]
+	}
 	return func(c *gin.Context) {
 		threadToken := c.GetHeader(proxy.ClassifierThreadHeader)
 		headerValues := c.Request.Header.Values(proxy.ClassifierThreadHeader)
@@ -77,6 +81,9 @@ func WithClassifierThread(service *proxy.Service) gin.HandlerFunc {
 			return
 		}
 		c.Request = c.Request.WithContext(ctx)
+		if !applyRoutingModel(c, body, availability) {
+			return
+		}
 		c.Next()
 	}
 }

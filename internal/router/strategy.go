@@ -25,7 +25,7 @@ const (
 	// StrategyHMMEmbedding uses the HMM sidecar with the embedding-quality-seeded bandit prior.
 	StrategyHMMEmbedding Strategy = "hmm_embedding"
 	// StrategyHMMBeta selects the beta HMM classifier.
-	// It is selected only by the session-scoped /beta toggle.
+	// It is selected explicitly by a routing model ID or a legacy session toggle.
 	StrategyHMMBeta Strategy = "hmm_beta"
 	// StrategyHMMQwen selects Qwen through the same classifier sidecar.
 	StrategyHMMQwen Strategy = "hmm_qwen"

@@ -83,6 +83,9 @@ func (s *Service) applySessionStrategy(
 	installationID uuid.UUID,
 	preferenceKey [sessionpin.SessionKeyLen]byte,
 ) (context.Context, error) {
+	if _, selected := router.RoutingModelFromContext(ctx); selected {
+		return ctx, nil
+	}
 	if router.StrategyFromContext(ctx) == router.StrategyLLMClassifier {
 		return ctx, nil
 	}
@@ -118,6 +121,9 @@ func (s *Service) handleBetaCommand(
 	preferenceKey [sessionpin.SessionKeyLen]byte,
 	inputTokens int,
 ) error {
+	if _, selected := router.RoutingModelFromContext(ctx); selected {
+		return writeBetaCommandResponse(w, env, fmt.Sprintf("Select a router with `wv router set-model %s`, `wv router set-model %s`, or `wv router set-model %s`, then start a new session.", router.ModelHMM, router.ModelQwen, router.ModelAutomatic), inputTokens)
+	}
 	strategy := cmd.Strategy
 	if strategy == "" {
 		strategy = router.StrategyHMMBeta
