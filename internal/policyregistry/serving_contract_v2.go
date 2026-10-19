@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"strings"
 	"time"
 )
@@ -114,13 +113,16 @@ func (b DeploymentBinding) lane() LaneBinding {
 
 // Equal compares every behavior-affecting classifier object, including the auxiliary inventory.
 func (c ClassifierComponent) Equal(other ClassifierComponent) bool {
-	return c.Identity.ArtifactID == other.Identity.ArtifactID && c.Identity.PackageSHA256 == other.Identity.PackageSHA256 && c.Identity.ImageDigest == other.Identity.ImageDigest && c.Identity.WireSchema == other.Identity.WireSchema && c.Identity.TaxonomySHA256 == other.Identity.TaxonomySHA256 && slices.Equal(c.Identity.ClassOrder, other.Identity.ClassOrder) && c.Package == other.Package && c.Configuration == other.Configuration && maps.Equal(c.AuxiliaryModels, other.AuxiliaryModels)
+	return c.Identity.Equal(other.Identity) && c.Package == other.Package && c.Configuration == other.Configuration && maps.Equal(c.AuxiliaryModels, other.AuxiliaryModels)
 }
 
 func (c ClassifierComponent) validate() error {
 	identity := c.Identity
 	if strings.TrimSpace(identity.ArtifactID) == "" || !validImageDigest(identity.ImageDigest) || identity.WireSchema != ClassifierWireSchemaV4 || len(identity.ClassOrder) == 0 || TaxonomyDigest(identity.ClassOrder) != identity.TaxonomySHA256 {
 		return errors.New("invalid classifier bundle identity or schema")
+	}
+	if err := identity.validateVariants(); err != nil {
+		return err
 	}
 	if err := validateArtifactRef(c.Package); err != nil {
 		return err

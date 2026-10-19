@@ -1045,6 +1045,7 @@ func main() {
 	var hmmRouter router.Router
 	var hmmEmbeddingRouter router.Router
 	var hmmBetaRouter router.Router
+	var hmmQwenRouter router.Router
 	var hmmCapabilities policy.Capabilities
 	var hmmReadinessChecker admin.HealthChecker
 	var hmmRosterSources map[router.Strategy]policy.RosterSource
@@ -1082,6 +1083,10 @@ func main() {
 		admittedRouter := policyregistry.NewAdmittedRouter(router.StrategyHMM, baseline)
 		hmmRouter = admittedRouter
 		hmmEmbeddingRouter = policyregistry.NewAdmittedRouter(router.StrategyHMMEmbedding, baseline)
+		if admission.Identity.Target == policyregistry.TargetInternal {
+			hmmBetaRouter = policyregistry.NewAdmittedRouter(router.StrategyHMMBeta, baseline)
+			hmmQwenRouter = policyregistry.NewAdmittedRouter(router.StrategyHMMQwen, baseline)
+		}
 		hmmCapabilities = admittedRouter.CurrentCapabilities()
 		escalationObserver = admittedRouter
 		rosterSource := policyregistry.AdmittedRosterSource{}
@@ -1342,6 +1347,10 @@ func main() {
 		WithPolicyStrategy(policy.StrategySpec{
 			Strategy: router.StrategyHMMBeta, Router: hmmBetaRouter, Unavailable: hmm.ErrHMMUnavailable,
 			Capabilities: hmmBetaCapabilities,
+		}).
+		WithPolicyStrategy(policy.StrategySpec{
+			Strategy: router.StrategyHMMQwen, Router: hmmQwenRouter, Unavailable: hmm.ErrHMMUnavailable,
+			Capabilities: hmmCapabilities,
 		}).
 		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyBandit, Router: banditRouter, Unavailable: bandit.ErrBanditUnavailable}).
 		WithContentCapture(captureMode, captureMaxBytes, nil).
