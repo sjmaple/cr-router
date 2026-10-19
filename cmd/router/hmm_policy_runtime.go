@@ -98,6 +98,12 @@ func hmmPolicySnapshotBuilder(
 				}
 			}
 			policyRouter := hmm.NewForStrategy(strategy, client, availableProviders)
+			strategyPolicySHA := candidate.Release.Policy.SHA256
+			strategyArmSelector := armSelector
+			if strategyPolicy, found := candidate.StrategyPolicies[strategy]; found {
+				strategyPolicySHA = strategyPolicy.Reference.SHA256
+				strategyArmSelector = selection.Selector(strategyPolicy.Roster)
+			}
 			strategyCapabilities := capabilities
 			if strategy == router.StrategyHMMQwen {
 				strategyCapabilities.ReportsOutcomes = false
@@ -107,10 +113,10 @@ func hmmPolicySnapshotBuilder(
 			policyRouter.WithClassifierIdentity(artifactID, artifactSHA)
 			policyRouter.WithSelectionPolicyIdentity(
 				candidate.HeadSnapshot.Head.ReleaseSHA256,
-				candidate.Release.Policy.SHA256,
+				strategyPolicySHA,
 				candidate.HeadSnapshot.Generation,
 			)
-			policyRouter.WithArmSelector(armSelector)
+			policyRouter.WithArmSelector(strategyArmSelector)
 			routers[strategy] = policyRouter
 		}
 		return routers, nil

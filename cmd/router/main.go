@@ -1093,6 +1093,10 @@ func main() {
 		hmmRosterSources = map[router.Strategy]policy.RosterSource{
 			router.StrategyHMM: rosterSource, router.StrategyHMMEmbedding: rosterSource,
 		}
+		if admission.Identity.Target == policyregistry.TargetInternal {
+			hmmRosterSources[router.StrategyHMMBeta] = rosterSource
+			hmmRosterSources[router.StrategyHMMQwen] = rosterSource
+		}
 		hmmRosterModels = admittedHMMRosterSource{}
 		if topic := strings.TrimSpace(config.GetOr("PUBSUB_TOPIC_ROUTER_POLICY_INVALIDATION", "")); topic != "" {
 			subscriptionCtx, cancelSubscription := context.WithTimeout(context.Background(), 30*time.Second)
