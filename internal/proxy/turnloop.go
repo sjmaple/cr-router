@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"sort"
@@ -2960,13 +2961,12 @@ func (s *Service) hardPinBlockedByContextWindow(hardPinReq HardPinRequest, req r
 	if len(req.ContextWindowExcludedModels) == 0 {
 		return false
 	}
-	unsized := make(map[string]struct{}, len(hardPinReq.ExcludedModels))
-	for model := range hardPinReq.ExcludedModels {
-		if _, sized := req.ContextWindowExcludedModels[model]; !sized {
-			unsized[model] = struct{}{}
-		}
-	}
-	hardPinReq.ExcludedModels = unsized
+	nonSizeExcluded := maps.Clone(hardPinReq.ExcludedModels)
+	maps.DeleteFunc(nonSizeExcluded, func(model string, _ struct{}) bool {
+		_, sized := req.ContextWindowExcludedModels[model]
+		return sized
+	})
+	hardPinReq.ExcludedModels = nonSizeExcluded
 	_, _, ok := s.hardPinResolver(hardPinReq)
 	return ok
 }
