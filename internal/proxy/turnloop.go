@@ -1053,7 +1053,7 @@ func (s *Service) runTurnLoop(
 				// Gateway empty result = no aliases configured (customer fix), not a router fault.
 				hardPinErr := cluster.ErrClusterUnavailable
 				switch {
-				case s.hardPinBlockedByContextWindow(hardPinReq, req):
+				case s.hardPinBlockedByContextWindow(ctx, threadSessionKey, res, hardPinReq, req):
 					hardPinErr = policy.ErrContextWindowExceeded
 				case len(req.GatewayProviders) > 0:
 					hardPinErr = policy.ErrGatewayServesNoDeployedModel
@@ -2954,18 +2954,27 @@ func sortedEnabledKeys(m map[string]struct{}) []string {
 	return out
 }
 
-// hardPinBlockedByContextWindow reports whether the hard-pin resolver only came
-// back empty because of the context-window pre-filter, so the client gets its
-// native prompt-too-long error instead of a retryable routing outage.
-func (s *Service) hardPinBlockedByContextWindow(hardPinReq HardPinRequest, req router.Request) bool {
+// hardPinBlockedByContextWindow reports whether the hard-pin only came back
+// empty because of the context-window pre-filter, so the client gets its
+// native prompt-too-long error instead of a retryable routing outage. A
+// compaction turn rechecks its own summarizer path too, which can reach models
+// the generic resolver cannot.
+func (s *Service) hardPinBlockedByContextWindow(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, res turnLoopResult, hardPinReq HardPinRequest, req router.Request) bool {
 	if len(req.ContextWindowExcludedModels) == 0 {
 		return false
 	}
-	nonSizeExcluded := maps.Clone(hardPinReq.ExcludedModels)
+	nonSizeExcluded := maps.Clone(req.ExcludedModels)
 	maps.DeleteFunc(nonSizeExcluded, func(model string, _ struct{}) bool {
 		_, sized := req.ContextWindowExcludedModels[model]
 		return sized
 	})
+	if s.compactionHardPinEnabled && res.TurnType == turntype.Compaction {
+		sizeFree := req
+		sizeFree.ExcludedModels = nonSizeExcluded
+		if _, _, _, ok := s.compactionHardPin(ctx, sessionKey, res.PinRole, sizeFree); ok {
+			return true
+		}
+	}
 	hardPinReq.ExcludedModels = nonSizeExcluded
 	_, _, ok := s.hardPinResolver(hardPinReq)
 	return ok

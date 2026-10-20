@@ -270,7 +270,7 @@ func TestTurnLoop_CompactionHardPinContextOverflowIsNotRoutingOutage(t *testing.
 		}
 		return providers.ProviderAnthropic, summarizer, true
 	}
-	run := func(t *testing.T, contextWindowExcluded map[string]struct{}) error {
+	run := func(t *testing.T, resolver HardPinResolver, contextWindowExcluded map[string]struct{}) error {
 		s := NewService(nil, map[string]providers.Client{providers.ProviderAnthropic: nil}, nil, false, nil, &rolePinStore{}, false, providers.ProviderAnthropic, policy.PrecompactionDefaultModel, nil).
 			WithHardPinResolver(resolver)
 		s.compactionHardPinEnabled = true
@@ -287,13 +287,19 @@ func TestTurnLoop_CompactionHardPinContextOverflowIsNotRoutingOutage(t *testing.
 		return err
 	}
 
-	err := run(t, map[string]struct{}{summarizer: {}, policy.PrecompactionDefaultModel: {}})
+	sizeExcluded := map[string]struct{}{summarizer: {}, policy.PrecompactionDefaultModel: {}}
+	err := run(t, resolver, sizeExcluded)
 	require.ErrorIs(t, err, policy.ErrContextWindowExceeded)
 	assert.NotErrorIs(t, err, cluster.ErrClusterUnavailable)
 	class, ok := ClassifyDispatchError(err)
 	require.True(t, ok)
 	assert.Equal(t, http.StatusBadRequest, class.Status)
 
-	err = run(t, nil)
+	outsideBundle := func(HardPinRequest) (string, string, bool) { return "", "", false }
+	err = run(t, outsideBundle, sizeExcluded)
+	assert.ErrorIs(t, err, policy.ErrContextWindowExceeded,
+		"a summarizer only the compaction path can reach still classifies the size-only failure")
+
+	err = run(t, resolver, nil)
 	assert.ErrorIs(t, err, cluster.ErrClusterUnavailable, "exclusions unrelated to size keep the routing-outage class")
 }
