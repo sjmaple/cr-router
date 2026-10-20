@@ -1572,10 +1572,13 @@ func (s *Service) restrictToTier(excluded map[string]struct{}, tier catalog.Tier
 // subscriptionProvidersForRequest lists providers a caller or managed subscription can serve.
 func subscriptionProvidersForRequest(ctx context.Context) map[string]struct{} {
 	available := map[string]struct{}{}
-	if anthropicSubscriptionFromContext(ctx) != "" || managedSubscriptionEnrolled(ctx, subscriptions.ProviderClaude) {
+	if subscriptionRoutingDisabledForRequest(ctx) || subscriptionFundingOutOfPlayForRequest(ctx) {
+		return available
+	}
+	if !claudeSubscriptionSuppressed(ctx) && (anthropicSubscriptionFromContext(ctx) != "" || managedSubscriptionEnrolled(ctx, subscriptions.ProviderClaude)) {
 		available[providers.ProviderAnthropic] = struct{}{}
 	}
-	if openaiSubscriptionFromContext(ctx) != "" || managedSubscriptionEnrolled(ctx, subscriptions.ProviderCodex) {
+	if !codexSubscriptionSuppressed(ctx) && (openaiSubscriptionFromContext(ctx) != "" || managedSubscriptionEnrolled(ctx, subscriptions.ProviderCodex)) {
 		available[providers.ProviderOpenAI] = struct{}{}
 	}
 	return available

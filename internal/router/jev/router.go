@@ -11,7 +11,7 @@ import (
 	"weave-os/router/internal/router/catalog"
 )
 
-// EscalationCadence is the call spacing between escalation checks.
+// EscalationCadence is the number of calls between escalation checks, which begin at call 4.
 const EscalationCadence = 3
 
 const maxTrackedSessions = 10_000
@@ -31,7 +31,7 @@ type Lineup struct {
 var (
 	// ClaudeCodeLineup serves Claude Code and every non-Codex client.
 	ClaudeCodeLineup = Lineup{Top: string(catalog.ModelIDClaudeOpus48), Fast: string(catalog.ModelIDClaudeHaiku45), LowTaskJudgment: "z-ai/glm-5.3", SubscriptionProvider: providers.ProviderAnthropic}
-	// CodexLineup serves Codex.
+	// CodexLineup is used only for Codex; its subscription provider is OpenAI.
 	CodexLineup = Lineup{Top: "gpt-6.1-sol", Fast: string(catalog.ModelIDGPT56Luna), LowTaskJudgment: "z-ai/glm-5.3", SubscriptionProvider: providers.ProviderOpenAI}
 )
 
@@ -129,11 +129,17 @@ func pickModel(lineup Lineup, session sessionState, callComplexity Choice) strin
 }
 
 // resolve keeps the picked model when the request can dispatch it and otherwise
-// falls back through the lineup from strongest to cheapest.
+// falls back through the lineup from strongest to cheapest. Automatic
+// exclusions are dropped only when they leave no lineup model.
 func resolve(req router.Request, model string, lineup Lineup) (router.Decision, error) {
-	for _, candidate := range []string{model, lineup.Top, lineup.Fast, lineup.LowTaskJudgment} {
-		if provider, ok := dispatchProvider(req, candidate); ok {
-			return router.Decision{Provider: provider, Model: candidate}, nil
+	for _, honorAutomaticExclusions := range []bool{true, false} {
+		for _, candidate := range []string{model, lineup.Top, lineup.Fast, lineup.LowTaskJudgment} {
+			if _, excluded := req.AutomaticExcludedModels[candidate]; honorAutomaticExclusions && excluded {
+				continue
+			}
+			if provider, ok := dispatchProvider(req, candidate); ok {
+				return router.Decision{Provider: provider, Model: candidate}, nil
+			}
 		}
 	}
 	return router.Decision{}, fmt.Errorf("%w: no lineup model is dispatchable", ErrUnavailable)
@@ -176,11 +182,11 @@ func availableProviders(req router.Request, model string) map[string]struct{} {
 		return req.EnabledProviders
 	}
 	entry, _ := catalog.ByID(model)
-	all := map[string]struct{}{}
+	allProviders := map[string]struct{}{}
 	for _, binding := range entry.Providers {
-		all[binding.Provider] = struct{}{}
+		allProviders[binding.Provider] = struct{}{}
 	}
-	return all
+	return allProviders
 }
 
 func (r *Router) load(sessionID string) sessionState {
@@ -189,14 +195,21 @@ func (r *Router) load(sessionID string) sessionState {
 	return r.sessions[sessionID]
 }
 
+// store merges session into the saved state so an overlapping call that
+// loaded older state cannot undo an escalation or reclassify the task.
 func (r *Router) store(sessionID string, session sessionState) {
 	if sessionID == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, known := r.sessions[sessionID]; !known {
+	saved, known := r.sessions[sessionID]
+	if !known {
 		r.order = append(r.order, sessionID)
+	}
+	session.escalated = session.escalated || saved.escalated
+	if saved.taskComplexity != "" {
+		session.taskComplexity = saved.taskComplexity
 	}
 	r.sessions[sessionID] = session
 	for len(r.order) > maxTrackedSessions {

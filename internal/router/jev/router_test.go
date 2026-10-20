@@ -183,3 +183,27 @@ func TestGatewayInstallationWithoutAliasIsUnavailable(t *testing.T) {
 	_, err := jev.New(classifier).Route(context.Background(), req)
 	require.ErrorIs(t, err, jev.ErrUnavailable)
 }
+
+func TestAutomaticExclusionFallsBackWithinLineup(t *testing.T) {
+	classifier := &scriptedClassifier{answers: map[jev.QuestionID]jev.Choice{jev.QuestionTaskComplexity: jev.ChoiceHigh, jev.QuestionCallComplexity: jev.ChoiceLow}}
+	req := request("", 1)
+	req.AutomaticExcludedModels = map[string]struct{}{"claude-haiku-4-5": {}}
+	decision, err := jev.New(classifier).Route(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, "claude-opus-4-8", decision.Model)
+}
+
+func TestSplitAssistantMessagesCountAsOneCall(t *testing.T) {
+	messages := []router.ConversationMessage{
+		{Role: "user", Text: "fix the failing test"},
+		{Role: "assistant", Text: "running both checks"},
+		{Role: "assistant", ToolCalls: []router.ConversationToolCall{{Name: "bash"}}},
+		{Role: "assistant", ToolCalls: []router.ConversationToolCall{{Name: "read"}}},
+		{Role: "tool", ToolResults: []router.ConversationToolResult{{ToolUseID: "1", IsError: true}}},
+		{Role: "tool", ToolResults: []router.ConversationToolResult{{ToolUseID: "2"}}},
+	}
+	require.Equal(t, 2, jev.AgentCallIndex(messages))
+	state := jev.BuildState(messages)
+	require.Len(t, state.RecentAgentTurns, 1)
+	require.Equal(t, []jev.ToolCall{{Name: "bash", Status: jev.ToolCallError}, {Name: "read", Status: jev.ToolCallOK}}, state.RecentAgentTurns[0].ToolCalls)
+}

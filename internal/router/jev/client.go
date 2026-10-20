@@ -20,7 +20,7 @@ const DefaultTimeout = 3 * time.Second
 
 const maxResponseBytes = 1 << 20
 
-// QuestionID names one typed routing question; Choice is its typed answer label.
+// QuestionID names one routing question; the value is the key used in the judge request.
 type QuestionID string
 
 const (

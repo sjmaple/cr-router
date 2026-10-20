@@ -1,6 +1,10 @@
 package jev
 
-import "weave-os/router/internal/router"
+import (
+	"strings"
+
+	"weave-os/router/internal/router"
+)
 
 const (
 	maxUserMessages  = 3
@@ -47,26 +51,53 @@ func isHumanMessage(message router.ConversationMessage) bool {
 // follow-ups like "continue" never hide what the task is.
 func BuildState(messages []router.ConversationMessage) State {
 	state := State{RecentUserMessages: []string{}, RecentAgentTurns: []AgentTurn{}}
-	for index, message := range messages {
+	for index := 0; index < len(messages); index++ {
+		message := messages[index]
 		switch {
 		case isHumanMessage(message) && state.Objective == "":
 			state.Objective = truncate(message.Text, maxObjectiveRune)
 		case isHumanMessage(message):
 			state.RecentUserMessages = appendBounded(state.RecentUserMessages, truncate(message.Text, maxUserRune), maxUserMessages)
 		case message.Role == "assistant":
-			state.RecentAgentTurns = appendBounded(state.RecentAgentTurns, agentTurn(message, messages[index+1:]), maxAgentTurns)
+			end := callEnd(messages, index)
+			state.RecentAgentTurns = appendBounded(state.RecentAgentTurns, agentTurn(messages[index:end], messages[end:]), maxAgentTurns)
+			index = end - 1
 		}
 	}
 	return state
 }
 
-func agentTurn(message router.ConversationMessage, following []router.ConversationMessage) AgentTurn {
-	turn := AgentTurn{Text: truncate(message.Text, maxAgentRune)}
-	var results []router.ConversationToolResult
-	if len(following) > 0 && following[0].Role != "assistant" {
-		results = following[0].ToolResults
+// callEnd returns the index after the run of assistant messages starting at
+// start; translation can split one model call into several such messages.
+func callEnd(messages []router.ConversationMessage, start int) int {
+	end := start
+	for end < len(messages) && messages[end].Role == "assistant" {
+		end++
 	}
-	for index, call := range message.ToolCalls {
+	return end
+}
+
+func agentTurn(call []router.ConversationMessage, following []router.ConversationMessage) AgentTurn {
+	var texts []string
+	var toolCalls []router.ConversationToolCall
+	for _, message := range call {
+		if message.Text != "" {
+			texts = append(texts, message.Text)
+		}
+		toolCalls = append(toolCalls, message.ToolCalls...)
+	}
+	var results []router.ConversationToolResult
+	for _, message := range following {
+		if message.Role == "assistant" {
+			break
+		}
+		results = append(results, message.ToolResults...)
+		if isHumanMessage(message) {
+			break
+		}
+	}
+	turn := AgentTurn{Text: truncate(strings.Join(texts, "\n"), maxAgentRune)}
+	for index, call := range toolCalls {
 		status := ToolCallPending
 		if index < len(results) && results[index].IsError {
 			status = ToolCallError
@@ -81,9 +112,10 @@ func agentTurn(message router.ConversationMessage, following []router.Conversati
 // AgentCallIndex is the 1-based logical model call this request starts.
 func AgentCallIndex(messages []router.ConversationMessage) int {
 	calls := 1
-	for _, message := range messages {
-		if message.Role == "assistant" {
+	for index := 0; index < len(messages); index++ {
+		if messages[index].Role == "assistant" {
 			calls++
+			index = callEnd(messages, index) - 1
 		}
 	}
 	return calls
